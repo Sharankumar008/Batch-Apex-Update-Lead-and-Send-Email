@@ -1,0 +1,68 @@
+public class LeadUpdateStatusBatch implements Database.Batchable<sObject>,Database.Stateful{
+    
+    Integer batchCount=0;
+    integer recordsProcessed=0, recordsFailed=0;
+    String jobId;
+    AsyncApexJob jobRecord;
+    
+    List<String> failedRecord=new List<String>();
+    
+    public Database.QueryLocator start(Database.BatchableContext bc){
+        
+        String query='Select id, name from Lead where createddate=LAST_n_DAYS:7 and Status=\'open - not Contacted\' order by createddate';
+        return Database.getqueryLocator(query);
+    }
+    public void execute(Database.BatchableContext bc, List<Lead> scope){
+        System.debug(scope.size());
+        
+        for(Lead leadRecord:scope){
+            leadRecord.Status='Open - not Converted';
+            
+        }
+        List<Database.SaveResult> srList=Database.update(scope,false);
+        
+        for(Database.SaveResult sr:srList){ //Database.SaveResult is a Class
+            if(sr.isSuccess()){
+                recordsProcessed+=1;
+            }
+            else{
+                recordsFailed+=1;
+                
+                String recordLink=url.getSalesforceBaseUrl().toExternalForm()+'/'+sr.getId();
+                failedRecord.add(recordLink);
+                
+                
+                for(Database.Error err:sr.getErrors()){//Database.Errors is a Class
+                    System.debug(err.getMessage());
+                }
+            }
+        }
+        
+    }
+    public void finish(Database.BatchableContext bc){
+        
+        jobId=bc.getJobId();
+        jobRecord=[Select id, jobItemsProcessed,totalJobItems, NumberOfErrors 
+                   from AsyncApexJob
+                   where id=:bc.getJobId()];
+        System.debug(jobRecord);
+        sendUrlEmail();
+    }
+    public void sendUrlEmail(){
+        String toAddress='sharan2000dpi@gmail.com';
+        String subject='Job Status' +jobId;
+        
+        String body='Batch Job Status<br/> Total Jobs: '+jobRecord.jobItemsProcessed;
+        body+='<br/> Job Errors: '+jobRecord.NumberOfErrors;
+        body+='<br/> Total records Processed: '+recordsProcessed;
+        body+='<br/> Total records failed: '+recordsFailed;
+        
+        for(String record:failedRecord){
+            body+='<br/>'+record;
+            
+        }
+        
+        EmailHelper.sendEmail(toAddress,subject,body);
+        
+    }	
+}
